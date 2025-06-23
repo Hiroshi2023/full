@@ -1,0 +1,108 @@
+name: Diamond ML CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  HF_REPO: diamond-model
+  MODEL_DIR: saved_model/
+  DOCS_DIR: docs/
+
+jobs:
+  build-train-eval-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+
+    # Étape 1 : Cloner le repo
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # Étape 2 : Installer Python et les dépendances
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install huggingface_hub
+        pip install smtplib email-validator
+
+    # Étape 3 : Prétraitement, entraînement, évaluation
+    - name: Run data processing
+      run: python script/data_processing.py
+
+    - name: Train the model
+      run: python script/model_training.py --output_dir ${{ env.MODEL_DIR }}
+
+    - name: Evaluate the model
+      run: python script/model_evaluation.py --model_dir ${{ env.MODEL_DIR }} --output_file score.txt
+
+    # Étape 4 : Vérifier si le score est au-dessus du seuil
+    - name: Compare score to threshold
+      id: check_score
+      run: |
+        SCORE=$(cat score.txt)
+        echo "Model Score: $SCORE"
+        THRESHOLD=${{ secrets.THRESHOLD_SCORE }}
+        echo "Threshold Score: $THRESHOLD"
+        if (( $(echo "$SCORE >= $THRESHOLD" | bc -l) )); then
+          echo "deploy=true" >> $GITHUB_OUTPUT
+        else
+          echo "deploy=false" >> $GITHUB_OUTPUT
+        fi
+
+    # Étape 5 : Déploiement sur Hugging Face si le score est suffisant
+    - name: Upload to Hugging Face Model Hub
+      if: steps.check_score.outputs.deploy == 'true'
+      run: |
+        from huggingface_hub import HfApi, HfFolder, Repository
+        import os
+        hf_token = os.environ["HF_API_KEY"]
+        model_repo = os.environ["HF_REPO"]
+        model_dir = os.environ["MODEL_DIR"]
+        api = HfApi()
+        if not api.repo_exists(model_repo, token=hf_token):
+            api.create_repo(model_repo, token=hf_token)
+        repo_url = api.upload_folder(
+          repo_id=model_repo,
+          folder_path=model_dir,
+          token=hf_token
+        )
+      env:
+        HF_API_KEY: ${{ secrets.HF_API_KEY }}
+
+    # Étape 6 : Envoi d’un e-mail de notification
+    - name: Send Email Notification
+      run: |
+        import smtplib
+        from email.message import EmailMessage
+        import os
+
+        user = os.environ["SMTP_USER"]
+        password = os.environ["SMTP_PASS"]
+        to = "hiroshiyewo@gmail.com"
+        msg = EmailMessage()
+        msg["Subject"] = "Résultat de l'entraînement du modèle Diamond"
+        msg["From"] = user
+        msg["To"] = to
+
+        with open("score.txt", "r") as f:
+            score = f.read().strip()
+
+        if "${{ steps.check_score.outputs.deploy }}" == "true":
+            msg.set_content(f"✅ Modèle déployé avec succès ! Score : {score}")
+        else:
+            msg.set_content(f"❌ Score insuffisant ({score}). Améliore ton modèle.")
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(user, password)
+            smtp.send_message(msg)
+      env:
+        SMTP_USER: ${{ secrets.SMTP_USER }}
+        SMTP_PASS: ${{ secrets.SMTP_PASS }}
