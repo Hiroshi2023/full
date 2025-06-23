@@ -31,8 +31,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install huggingface_hub
-        pip install smtplib email-validator
-
     # Étape 3 : Prétraitement, entraînement, évaluation
     - name: Run data processing
       run: python script/data_processing.py
