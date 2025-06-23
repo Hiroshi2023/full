@@ -76,33 +76,3 @@ jobs:
         )
       env:
         HF_API_KEY: ${{ secrets.HF_API_KEY }}
-
-    # Étape 6 : Envoi d’un e-mail de notification
-    - name: Send Email Notification
-      run: |
-        import smtplib
-        from email.message import EmailMessage
-        import os
-
-        user = os.environ["SMTP_USER"]
-        password = os.environ["SMTP_PASS"]
-        to = "hiroshiyewo@gmail.com"
-        msg = EmailMessage()
-        msg["Subject"] = "Résultat de l'entraînement du modèle Diamond"
-        msg["From"] = user
-        msg["To"] = to
-
-        with open("score.txt", "r") as f:
-            score = f.read().strip()
-
-        if "${{ steps.check_score.outputs.deploy }}" == "true":
-            msg.set_content(f"✅ Modèle déployé avec succès ! Score : {score}")
-        else:
-            msg.set_content(f"❌ Score insuffisant ({score}). Améliore ton modèle.")
-
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(user, password)
-            smtp.send_message(msg)
-      env:
-        SMTP_USER: ${{ secrets.SMTP_USER }}
-        SMTP_PASS: ${{ secrets.SMTP_PASS }}
